@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Заявка на расход</title>
+
+    <link rel="stylesheet" href="./css/normalize.css" />
+    <link rel="stylesheet" href="./css/styles.css" />
+
+    <!-- Bitrix24 JS SDK -->
+    <script src="https://api.bitrix24.com/api/v1/"></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <h1 class="title">Заявка на расход</h1>
+
+      <form id="expenseForm" class="form">
+        <!-- 1) Инициатор -->
+        <div class="field">
+          <label class="label" for="initiator">Инициатор</label>
+          <select id="initiator" name="initiatorId" class="control" required>
+            <option value="">Загрузка пользователей...</option>
+          </select>
+          <div class="hint" id="initiatorHint"></div>
+        </div>
+
+        <!-- 2) Дилерский центр (UI сейчас, логика позже) -->
+        <div class="field">
+          <label class="label" for="dealerCenter">Дилерский центр</label>
+          <select id="dealerCenter" name="dealerCenterId" class="control">
+            <option value="">— Выберите дилерский центр —</option>
+            <!-- TODO: подгрузка из списка -->
+          </select>
+          <div class="hint">
+            TODO: подтянуть из списка. От этого поля будет зависеть
+            “Подразделение расхода”.
+          </div>
+        </div>
+
+        <!-- 3) Для какого подразделения расход (зависит от дилерского центра) -->
+        <div class="field">
+          <label class="label" for="expenseDepartment"
+            >Для какого подразделения расход</label
+          >
+          <select
+            id="expenseDepartment"
+            name="expenseDepartmentId"
+            class="control"
+            data-depends-on="dealerCenter"
+          >
+            <option value="">— Выберите подразделение —</option>
+            <!-- TODO: зависимости от dealerCenter -->
+          </select>
+          <div class="hint">
+            TODO: если дилерский центр не выбран — показывать все, иначе
+            фильтровать по родителю.
+          </div>
+        </div>
+
+        <!-- 4) Статья затрат -->
+        <div class="field">
+          <label class="label" for="expenseCategory">Статья затрат</label>
+          <select id="expenseCategory" name="expenseCategoryId" class="control">
+            <option value="">— Выберите статью —</option>
+            <!-- TODO: подгрузка из списка -->
+          </select>
+          <div class="hint">
+            TODO: подтянуть из списка (как дилерский центр).
+          </div>
+        </div>
+
+        <!-- 5) Подстатья (зависит от статьи) -->
+        <div class="field">
+          <label class="label" for="expenseSubcategory">Подстатья</label>
+          <select
+            id="expenseSubcategory"
+            name="expenseSubcategoryId"
+            class="control"
+            data-depends-on="expenseCategory"
+          >
+            <option value="">— Выберите подстатью —</option>
+            <!-- TODO: зависимости от expenseCategory -->
+          </select>
+          <div class="hint">
+            TODO: если статья не выбрана — показывать все, иначе фильтровать по
+            родителю.
+          </div>
+        </div>
+
+        <!-- Название -->
+        <div class="field">
+          <label class="label" for="title">Название</label>
+          <input
+            id="title"
+            name="title"
+            class="control"
+            type="text"
+            placeholder="Например: Оплата счета"
+            required
+          />
+        </div>
+
+        <!-- 6) Сумма: число + валюта -->
+        <div class="field">
+          <label class="label">Сумма</label>
+          <div class="row2">
+            <input
+              id="amount"
+              name="amount"
+              class="control"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              required
+            />
+            <select id="currency" name="currency" class="control" required>
+              <option value="">Загрузка валют...</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 7) Тип оплаты: 2 списка -->
+        <div class="field">
+          <label class="label">Тип оплаты</label>
+          <div class="row2">
+            <select
+              id="paymentType"
+              name="paymentType"
+              class="control"
+              required
+            >
+              <option value="">— Выберите —</option>
+              <option value="Безналичный расчет">Безналичный расчет</option>
+              <option value="Наличными">Наличными</option>
+              <option value="Перечисление на карту">
+                Перечисление на карту
+              </option>
+            </select>
+
+            <select
+              id="paymentTiming"
+              name="paymentTiming"
+              class="control"
+              required
+            >
+              <option value="">— Выберите —</option>
+              <option value="Постоплата">Постоплата</option>
+              <option value="Предоплата">Предоплата</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- === Место под ещё 5 полей === -->
+        <section class="placeholder">
+          <h2 class="subtitle">Дополнительные поля</h2>
+
+          <div class="field">
+            <label class="label" for="contractor"
+              >Наименование контрагента</label
+            >
+            <input
+              id="contractor"
+              name="contractor"
+              class="control"
+              type="text"
+              placeholder="..."
+            />
+          </div>
+
+          <div class="field">
+            <label class="label" for="contractNo">№ договора</label>
+            <input
+              id="contractNo"
+              name="contractNo"
+              class="control"
+              type="text"
+              placeholder="..."
+            />
+          </div>
+
+          <div class="field">
+            <label class="label" for="invoiceNo">№ счета</label>
+            <input
+              id="invoiceNo"
+              name="invoiceNo"
+              class="control"
+              type="text"
+              placeholder="..."
+            />
+          </div>
+
+          <div class="field">
+            <label class="label" for="needText">Необходимость расхода</label>
+            <textarea
+              id="needText"
+              name="needText"
+              class="control"
+              rows="4"
+              placeholder="Опишите необходимость..."
+            ></textarea>
+          </div>
+
+          <div class="field">
+            <label class="label" for="files">Файлы</label>
+            <input
+              id="files"
+              name="files"
+              class="control"
+              type="file"
+              multiple
+            />
+          </div>
+        </section>
+
+        <div class="actions">
+          <button class="btn" type="submit">Отправить заявку</button>
+        </div>
+      </form>
+
+      <pre class="debug" id="debug"></pre>
+    </main>
+
+    <script src="./js/main.js"></script>
+  </body>
+</html>
