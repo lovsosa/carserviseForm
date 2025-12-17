@@ -34,10 +34,7 @@
             <option value="">— Выберите дилерский центр —</option>
             <!-- TODO: подгрузка из списка -->
           </select>
-          <div class="hint">
-            TODO: подтянуть из списка. От этого поля будет зависеть
-            “Подразделение расхода”.
-          </div>
+          <div id="dealerCenterHint"></div>
         </div>
 
         <!-- 3) Для какого подразделения расход (зависит от дилерского центра) -->
@@ -52,12 +49,8 @@
             data-depends-on="dealerCenter"
           >
             <option value="">— Выберите подразделение —</option>
-            <!-- TODO: зависимости от dealerCenter -->
           </select>
-          <div class="hint">
-            TODO: если дилерский центр не выбран — показывать все, иначе
-            фильтровать по родителю.
-          </div>
+          <div id="expenseDepartmentHint"></div>
         </div>
 
         <!-- 4) Статья затрат -->
@@ -67,9 +60,7 @@
             <option value="">— Выберите статью —</option>
             <!-- TODO: подгрузка из списка -->
           </select>
-          <div class="hint">
-            TODO: подтянуть из списка (как дилерский центр).
-          </div>
+          <div id="expenseCategoryHint"></div>
         </div>
 
         <!-- 5) Подстатья (зависит от статьи) -->
@@ -84,10 +75,7 @@
             <option value="">— Выберите подстатью —</option>
             <!-- TODO: зависимости от expenseCategory -->
           </select>
-          <div class="hint">
-            TODO: если статья не выбрана — показывать все, иначе фильтровать по
-            родителю.
-          </div>
+          <div id="expenseSubcategoryHint"></div>
         </div>
 
         <!-- Название -->
@@ -120,6 +108,7 @@
             <select id="currency" name="currency" class="control" required>
               <option value="">Загрузка валют...</option>
             </select>
+            <div id="currencyHint"></div>
           </div>
         </div>
 
