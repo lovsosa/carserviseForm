@@ -1,7 +1,7 @@
-const API_URL = "https://carservice.bitrix24.kz/rest/25585/law35drn41ly2wm1/";
+﻿const API_URL = "https://carservice.bitrix24.kz/rest/25585/law35drn41ly2wm1/";
 const $ = (sel) => document.querySelector(sel);
 
-const DEBUG_DUMP_VALUES = true; // ✅ если слишком много логов — поставь false
+const DEBUG_DUMP_VALUES = true;
 
 const debugEl = $("#debug");
 const logDebug = (obj) => {
@@ -29,7 +29,7 @@ function setHint(id, text) {
 function setSelectOptions(
   selectEl,
   items,
-  { placeholder = "— Выберите —", valueKey = "value", labelKey = "label" } = {}
+  { placeholder = "Р’С‹Р±РµСЂРёС‚Рµ", valueKey = "value", labelKey = "label" } = {}
 ) {
   selectEl.innerHTML = "";
 
@@ -46,14 +46,62 @@ function setSelectOptions(
   }
 }
 
-// ---------- DEBUG HELPERS ----------
+// ========= CACHE HELPERS =========
+const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 С‡Р°СЃРѕРІ
+
+function readCache(key, ver, ttlMs = CACHE_TTL_MS) {
+  const raw = sessionStorage.getItem(key);
+  if (!raw) return { state: "miss" };
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return { state: "legacy", data: parsed };
+    if (parsed.ver !== ver) return { state: "ver_mismatch" };
+    const age = Date.now() - (parsed.fetchedAt || 0);
+    const fresh = age <= ttlMs;
+    return { state: fresh ? "fresh" : "stale", data: parsed.data };
+  } catch (_) {
+    sessionStorage.removeItem(key);
+    return { state: "error" };
+  }
+}
+
+function writeCache(key, ver, data) {
+  try {
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        ver,
+        fetchedAt: Date.now(),
+        data,
+      })
+    );
+  } catch (_) {}
+}
+
+async function loadWithCache({ key, version, fetcher, onData }) {
+  const cache = readCache(key, version);
+  if (cache.data) {
+    onData(cache.data, cache.state);
+    if (cache.state === "fresh") return cache;
+  }
+
+  try {
+    const freshData = await fetcher();
+    onData(freshData, "fresh");
+    writeCache(key, version, freshData);
+    return { state: "fresh", data: freshData };
+  } catch (e) {
+    if (!cache.data) throw e;
+    return { state: cache.state, data: cache.data, error: e };
+  }
+}
+
 function dumpValues(label, items) {
   if (!DEBUG_DUMP_VALUES) return;
 
   try {
-    console.groupCollapsed(`🔎 ${label} (count=${items?.length ?? 0})`);
-    console.log(items); // ✅ все значения (как просил)
-    // если это объекты с id/name — удобно видеть таблицей
+    console.groupCollapsed(`рџ”Ћ ${label} (count=${items?.length ?? 0})`);
+    console.log(items);
     if (Array.isArray(items) && items.length && typeof items[0] === "object") {
       console.table(items);
     }
@@ -79,8 +127,8 @@ if (!isInBitrix) {
         cb({
           error: () => null,
           data: () => [
-            { ID: 1, NAME: "Тест", LAST_NAME: "Пользователь" },
-            { ID: 2, NAME: "Иван", LAST_NAME: "Иванов" },
+            { ID: 1, NAME: "РўРµСЃС‚", LAST_NAME: "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ" },
+            { ID: 2, NAME: "РРІР°РЅ", LAST_NAME: "РРІР°РЅРѕРІ" },
           ],
           more: () => false,
           next: () => { },
@@ -92,10 +140,10 @@ if (!isInBitrix) {
         cb({
           error: () => null,
           data: () => [
-            { CURRENCY: "KGS", FULL_NAME: "Кыргызский сом" },
-            { CURRENCY: "USD", FULL_NAME: "Доллар США" },
-            { CURRENCY: "EUR", FULL_NAME: "Евро" },
-            { CURRENCY: "RUB", FULL_NAME: "Российский рубль" },
+            { CURRENCY: "KGS", FULL_NAME: "РљС‹СЂРіС‹Р·СЃРєРёР№ СЃРѕРј" },
+            { CURRENCY: "USD", FULL_NAME: "Р”РѕР»Р»Р°СЂ РЎРЁРђ" },
+            { CURRENCY: "EUR", FULL_NAME: "Р•РІСЂРѕ" },
+            { CURRENCY: "RUB", FULL_NAME: "Р РѕСЃСЃРёР№СЃРєРёР№ СЂСѓР±Р»СЊ" },
           ],
           more: () => false,
           next: () => { },
@@ -128,10 +176,6 @@ function bx24Call(method, params = {}) {
   });
 }
 
-/**
- * ✅ Правильная пагинация для BX24 JS SDK: res.more()/res.next()
- * (лимит 50 — норм, просто тянем все страницы)
- */
 function bx24CallAll(method, params = {}) {
   return new Promise((resolve, reject) => {
     const all = [];
@@ -165,7 +209,7 @@ function bx24CallAll(method, params = {}) {
       );
 
       if (more) {
-        res.next(); // подтянет следующую страницу и снова вызовет handler
+        res.next();
         return;
       }
 
@@ -220,30 +264,29 @@ async function loadUsersToInitiator() {
   initiator.innerHTML = `<option value="">Загрузка пользователей...</option>`;
   setHint(hintId, "");
 
-  const CACHE_KEY = "b24_active_users_v1";
-  const cached = sessionStorage.getItem(CACHE_KEY);
+  const CACHE_KEY = "b24_active_users_v2";
+  const cache = readCache(CACHE_KEY, "v2");
+  let currentUserId = null;
+  try {
+    currentUserId = await getCurrentUserId();
+  } catch (_) {}
 
-  if (cached) {
-    try {
-      const items = JSON.parse(cached);
-      setSelectOptions(initiator, items, { placeholder: "Выберите инициатора" });
-
-      try {
-        const currentUserId = await getCurrentUserId();
-        if (items.some((x) => String(x.value) === String(currentUserId))) {
-          initiator.value = String(currentUserId);
-        }
-      } catch (_) { }
-
-      initiator.disabled = false;
-      setHint(hintId, `Пользователи (кеш): ${items.length}`);
-
-      dumpValues("Users (CACHE) mapped", items);
-      return;
-    } catch (_) {
-      sessionStorage.removeItem(CACHE_KEY);
+  const applyItems = (items, sourceLabel) => {
+    setSelectOptions(initiator, items, { placeholder: "Выберите инициатора" });
+    if (currentUserId && items.some((x) => String(x.value) === String(currentUserId))) {
+      initiator.value = String(currentUserId);
     }
+    initiator.disabled = false;
+    setHint(hintId, `${sourceLabel}: ${items.length}`);
+  };
+
+  if (cache.data?.length) {
+    applyItems(cache.data, cache.state === "fresh" ? "Кэш (актуальный)" : "Кэш (устаревший)");
+    dumpValues("Users (CACHE) mapped", cache.data);
   }
+
+  const shouldFetch = cache.state !== "fresh";
+  if (!shouldFetch && cache.data?.length) return;
 
   try {
     const users = await bx24CallAll("user.get", {
@@ -251,7 +294,7 @@ async function loadUsersToInitiator() {
       SELECT: ["ID", "NAME", "LAST_NAME"],
     });
 
-    const currentUserId = await getCurrentUserId();
+    const currentUserIdFresh = currentUserId;
 
     const items = (users || [])
       .map((u) => ({
@@ -260,21 +303,23 @@ async function loadUsersToInitiator() {
       }))
       .filter((x) => x.value && x.label);
 
-    setSelectOptions(initiator, items, { placeholder: "Выберите инициатора" });
-
-    if (items.some((x) => String(x.value) === String(currentUserId))) {
-      initiator.value = String(currentUserId);
+    if (currentUserIdFresh && items.some((x) => String(x.value) === String(currentUserIdFresh))) {
+      initiator.value = String(currentUserIdFresh);
+    }
+    if (currentUserIdFresh) {
+      currentUserId = currentUserIdFresh;
     }
 
-    initiator.disabled = false;
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(items));
-    setHint(hintId, `Пользователи: ${items.length}`);
-
-    dumpValues("Users mapped", items);
+    applyItems(items, "Обновлено");
+    writeCache(CACHE_KEY, "v2", items);
+    dumpValues("Users mapped (fresh)", items);
   } catch (e) {
-    initiator.innerHTML = `<option value="">Не удалось загрузить пользователей</option>`;
-    initiator.disabled = false;
-    setHint(hintId, `Ошибка: ${e?.message || String(e)}`);
+    if (!cache.data) {
+      initiator.innerHTML = `<option value="">Нет доступа к списку пользователей</option>`;
+      initiator.disabled = false;
+    }
+    const prefix = cache.data ? "Ошибка, показан кэш" : "Ошибка";
+    setHint(hintId, `${prefix}: ${e?.message || String(e)}`);
   }
 }
 
@@ -287,69 +332,17 @@ async function loadDCAndPDC() {
   const dcHintId = "dealerCenterHint";
   const pdcHintId = "expenseDepartmentHint";
 
-  const DC_CACHE = cacheKey("b24_dc", REF.DC, "v3");
-  const PDC_CACHE = cacheKey("b24_pdc", REF.PDC, "v3");
+  const DC_CACHE = cacheKey("b24_dc", REF.DC, "v4");
+  const PDC_CACHE = cacheKey("b24_pdc", REF.PDC, "v4");
 
   dcSelect.disabled = true;
   pdcSelect.disabled = true;
   setHint(dcHintId, "");
   setHint(pdcHintId, "");
 
-  // --- ДЦ ---
-  let dcElements;
-  const dcCached = sessionStorage.getItem(DC_CACHE);
-  if (dcCached) {
-    dcElements = JSON.parse(dcCached);
-    logStage("DC", `loaded from CACHE total=${dcElements.length}`);
-    dumpValues("DC (CACHE) RAW", dcElements);
-  } else {
-    dcElements = await loadListElements({
-      iblockTypeId: REF.DC.IBLOCK_TYPE_ID,
-      iblockId: REF.DC.IBLOCK_ID,
-      select: ["ID", "NAME"],
-      labelForLogs: "DC",
-    });
-    sessionStorage.setItem(DC_CACHE, JSON.stringify(dcElements));
-  }
+  let pdcNorm = [];
 
-  const dcItems = (dcElements || []).map((el) => ({
-    value: el.ID,
-    label: String(el.NAME || "").trim() || `ID ${el.ID}`,
-  }));
-
-  setSelectOptions(dcSelect, dcItems, { placeholder: "— Выберите ДЦ —" });
-  dcSelect.disabled = false;
-  setHint(dcHintId, `ДЦ: ${dcItems.length}`);
-
-  dumpValues("DC mapped", dcItems);
-
-  // --- ПДЦ ---
-  let pdcElements;
-  const pdcCached = sessionStorage.getItem(PDC_CACHE);
-  if (pdcCached) {
-    pdcElements = JSON.parse(pdcCached);
-    logStage("PDC", `loaded from CACHE total=${pdcElements.length}`);
-    dumpValues("PDC (CACHE) RAW", pdcElements);
-  } else {
-    pdcElements = await loadListElements({
-      iblockTypeId: REF.PDC.IBLOCK_TYPE_ID,
-      iblockId: REF.PDC.IBLOCK_ID,
-      select: ["ID", "NAME", REF.PDC.PARENT_FIELD],
-      labelForLogs: "PDC",
-    });
-    sessionStorage.setItem(PDC_CACHE, JSON.stringify(pdcElements));
-  }
-
-  const pdcNorm = (pdcElements || []).map((el) => ({
-    id: String(el.ID),
-    name: String(el.NAME || `ID ${el.ID}`).trim(),
-    parentId: extractLinkedElementId(el[REF.PDC.PARENT_FIELD]),
-    parentRaw: el[REF.PDC.PARENT_FIELD],
-  }));
-
-  dumpValues("PDC normalized", pdcNorm);
-
-  function refreshPDC() {
+  const refreshPDC = () => {
     const dcId = dcSelect.value ? String(dcSelect.value) : "";
     const filtered = dcId ? pdcNorm.filter((x) => String(x.parentId) === dcId) : pdcNorm;
 
@@ -368,15 +361,59 @@ async function loadDCAndPDC() {
     );
 
     dumpValues(dcId ? `PDC filtered by DC=${dcId}` : "PDC filtered (no DC)", filtered);
-  }
+  };
 
-  refreshPDC();
+  await loadWithCache({
+    key: DC_CACHE,
+    version: "v4",
+    fetcher: () =>
+      loadListElements({
+        iblockTypeId: REF.DC.IBLOCK_TYPE_ID,
+        iblockId: REF.DC.IBLOCK_ID,
+        select: ["ID", "NAME"],
+        labelForLogs: "DC",
+      }),
+    onData: (dcElements, state) => {
+      const dcItems = (dcElements || []).map((el) => ({
+        value: el.ID,
+        label: String(el.NAME || "").trim() || `ID ${el.ID}`,
+      }));
+
+      setSelectOptions(dcSelect, dcItems, { placeholder: "— Выберите ДЦ —" });
+      dcSelect.disabled = false;
+      setHint(dcHintId, `ДЦ (${state}): ${dcItems.length}`);
+      dumpValues(`DC mapped (${state})`, dcItems);
+    },
+  });
+
+  await loadWithCache({
+    key: PDC_CACHE,
+    version: "v4",
+    fetcher: () =>
+      loadListElements({
+        iblockTypeId: REF.PDC.IBLOCK_TYPE_ID,
+        iblockId: REF.PDC.IBLOCK_ID,
+        select: ["ID", "NAME", REF.PDC.PARENT_FIELD],
+        labelForLogs: "PDC",
+      }),
+    onData: (pdcElements, state) => {
+      pdcNorm = (pdcElements || []).map((el) => ({
+        id: String(el.ID),
+        name: String(el.NAME || `ID ${el.ID}`).trim(),
+        parentId: extractLinkedElementId(el[REF.PDC.PARENT_FIELD]),
+        parentRaw: el[REF.PDC.PARENT_FIELD],
+      }));
+
+      dumpValues(`PDC normalized (${state})`, pdcNorm);
+      refreshPDC();
+    },
+  });
+
   dcSelect.addEventListener("change", () => {
     pdcSelect.disabled = true;
     refreshPDC();
   });
 }
-
 // ========= Articles / Subarticles =========
 async function loadArticlesAndSubarticles() {
   const articleSelect = $("#expenseCategory");
@@ -386,96 +423,88 @@ async function loadArticlesAndSubarticles() {
   const aHintId = "expenseCategoryHint";
   const sHintId = "expenseSubcategoryHint";
 
-  const A_CACHE = cacheKey("b24_article", REF.EXPENSE_ARTICLE, "v3");
-  const S_CACHE = cacheKey("b24_subarticle", REF.EXPENSE_SUBARTICLE, "v3");
+  const A_CACHE = cacheKey("b24_article", REF.EXPENSE_ARTICLE, "v4");
+  const S_CACHE = cacheKey("b24_subarticle", REF.EXPENSE_SUBARTICLE, "v4");
 
   articleSelect.disabled = true;
   subSelect.disabled = true;
   setHint(aHintId, "");
   setHint(sHintId, "");
 
-  // --- статьи ---
-  let aElements;
-  const aCached = sessionStorage.getItem(A_CACHE);
-  if (aCached) {
-    aElements = JSON.parse(aCached);
-    logStage("ARTICLES", `loaded from CACHE total=${aElements.length}`);
-    dumpValues("ARTICLES (CACHE) RAW", aElements);
-  } else {
-    aElements = await loadListElements({
-      iblockTypeId: REF.EXPENSE_ARTICLE.IBLOCK_TYPE_ID,
-      iblockId: REF.EXPENSE_ARTICLE.IBLOCK_ID,
-      select: ["ID", "NAME"],
-      labelForLogs: "ARTICLES",
-    });
-    sessionStorage.setItem(A_CACHE, JSON.stringify(aElements));
-  }
+  let sNorm = [];
 
-  const aItems = (aElements || []).map((el) => ({
-    value: String(el.ID),
-    label: String(el.NAME || `ID ${el.ID}`).trim(),
-  }));
-
-  setSelectOptions(articleSelect, aItems, { placeholder: "— Выберите статью —" });
-  articleSelect.disabled = false;
-  setHint(aHintId, `Статьи: ${aItems.length}`);
-
-  dumpValues("ARTICLES mapped", aItems);
-
-  // --- подстатьи ---
-  let sElements;
-  const sCached = sessionStorage.getItem(S_CACHE);
-  if (sCached) {
-    sElements = JSON.parse(sCached);
-    logStage("SUBARTICLES", `loaded from CACHE total=${sElements.length}`);
-    dumpValues("SUBARTICLES (CACHE) RAW", sElements);
-  } else {
-    sElements = await loadListElements({
-      iblockTypeId: REF.EXPENSE_SUBARTICLE.IBLOCK_TYPE_ID,
-      iblockId: REF.EXPENSE_SUBARTICLE.IBLOCK_ID,
-      select: ["ID", "NAME", REF.EXPENSE_SUBARTICLE.PARENT_FIELD],
-      labelForLogs: "SUBARTICLES",
-    });
-    sessionStorage.setItem(S_CACHE, JSON.stringify(sElements));
-  }
-
-  const sNorm = (sElements || []).map((el) => ({
-    id: String(el.ID),
-    name: String(el.NAME || `ID ${el.ID}`).trim(),
-    parentId: extractLinkedElementId(el[REF.EXPENSE_SUBARTICLE.PARENT_FIELD]),
-    parentRaw: el[REF.EXPENSE_SUBARTICLE.PARENT_FIELD],
-  }));
-
-  dumpValues("SUBARTICLES normalized", sNorm);
-
-  function refreshSub() {
+  const refreshSub = () => {
     const aId = articleSelect.value ? String(articleSelect.value) : "";
     const filtered = aId ? sNorm.filter((x) => String(x.parentId) === aId) : sNorm;
 
     setSelectOptions(
       subSelect,
       filtered.map((x) => ({ value: x.id, label: x.name })),
-      { placeholder: "— Выберите подстатью —" }
+      { placeholder: "— Выберите подкатегорию —" }
     );
     subSelect.disabled = false;
 
     setHint(
       sHintId,
       aId
-        ? `Подстатьи по статье ${aId}: ${filtered.length} (всего: ${sNorm.length})`
-        : `Подстатьи (всего): ${sNorm.length}`
+        ? `Подкатегории по статье ${aId}: ${filtered.length} (всего: ${sNorm.length})`
+        : `Подкатегории (всего): ${sNorm.length}`
     );
 
     dumpValues(aId ? `SUBARTICLES filtered by Article=${aId}` : "SUBARTICLES filtered (no article)", filtered);
-  }
+  };
 
-  refreshSub();
+  await loadWithCache({
+    key: A_CACHE,
+    version: "v4",
+    fetcher: () =>
+      loadListElements({
+        iblockTypeId: REF.EXPENSE_ARTICLE.IBLOCK_TYPE_ID,
+        iblockId: REF.EXPENSE_ARTICLE.IBLOCK_ID,
+        select: ["ID", "NAME"],
+        labelForLogs: "ARTICLES",
+      }),
+    onData: (aElements, state) => {
+      const aItems = (aElements || []).map((el) => ({
+        value: String(el.ID),
+        label: String(el.NAME || `ID ${el.ID}`).trim(),
+      }));
+
+      setSelectOptions(articleSelect, aItems, { placeholder: "— Выберите статью —" });
+      articleSelect.disabled = false;
+      setHint(aHintId, `Статьи (${state}): ${aItems.length}`);
+      dumpValues(`ARTICLES mapped (${state})`, aItems);
+    },
+  });
+
+  await loadWithCache({
+    key: S_CACHE,
+    version: "v4",
+    fetcher: () =>
+      loadListElements({
+        iblockTypeId: REF.EXPENSE_SUBARTICLE.IBLOCK_TYPE_ID,
+        iblockId: REF.EXPENSE_SUBARTICLE.IBLOCK_ID,
+        select: ["ID", "NAME", REF.EXPENSE_SUBARTICLE.PARENT_FIELD],
+        labelForLogs: "SUBARTICLES",
+      }),
+    onData: (sElements, state) => {
+      sNorm = (sElements || []).map((el) => ({
+        id: String(el.ID),
+        name: String(el.NAME || `ID ${el.ID}`).trim(),
+        parentId: extractLinkedElementId(el[REF.EXPENSE_SUBARTICLE.PARENT_FIELD]),
+        parentRaw: el[REF.EXPENSE_SUBARTICLE.PARENT_FIELD],
+      }));
+
+      dumpValues(`SUBARTICLES normalized (${state})`, sNorm);
+      refreshSub();
+    },
+  });
+
   articleSelect.addEventListener("change", () => {
     subSelect.disabled = true;
     refreshSub();
   });
 }
-
 // ========= Currencies =========
 async function loadCurrencies() {
   const currency = $("#currency");
@@ -485,31 +514,208 @@ async function loadCurrencies() {
   setHint(hintId, "");
 
   const fallback = [
-    { value: "KGS", label: "KGS — Сом" },
-    { value: "USD", label: "USD — Доллар" },
-    { value: "EUR", label: "EUR — Евро" },
-    { value: "RUB", label: "RUB — Рубль" },
+    { value: "KGS", label: "KGS — сом" },
+    { value: "USD", label: "USD — доллар" },
+    { value: "EUR", label: "EUR — евро" },
+    { value: "RUB", label: "RUB — рубль" },
   ];
 
-  try {
-    const list = await bx24CallAll("crm.currency.list", {});
-    const items = (list || []).map((c) => ({
-      value: c.CURRENCY,
-      label: `${c.CURRENCY}${c.FULL_NAME ? " — " + c.FULL_NAME : ""}`,
-    }));
+  const CUR_CACHE = "b24_currencies_v2";
 
-    setSelectOptions(currency, items.length ? items : fallback, { placeholder: "— Выберите валюту —" });
+  await loadWithCache({
+    key: CUR_CACHE,
+    version: "v2",
+    fetcher: () => bx24CallAll("crm.currency.list", {}),
+    onData: (list, state) => {
+      const items = (list || []).map((c) => ({
+        value: c.CURRENCY,
+        label: `${c.CURRENCY}${c.FULL_NAME ? " — " + c.FULL_NAME : ""}`,
+      }));
 
-    const kgs = items.find((i) => i.value === "KGS");
-    if (kgs) currency.value = "KGS";
+      const dataset = items.length ? items : fallback;
+      setSelectOptions(currency, dataset, { placeholder: "— Выберите валюту —" });
 
-    setHint(hintId, `Валюты: ${items.length ? items.length : fallback.length}`);
-    dumpValues("Currencies mapped", items.length ? items : fallback);
-  } catch (_) {
+      const kgs = dataset.find((i) => i.value === "KGS");
+      if (kgs) currency.value = "KGS";
+
+      setHint(hintId, `Валюты (${state}): ${dataset.length}`);
+      dumpValues("Currencies mapped", dataset);
+    },
+  }).catch(() => {
     setSelectOptions(currency, fallback, { placeholder: "— Выберите валюту —" });
-    setHint(hintId, `Валюты: ${fallback.length} (fallback)`);
-    dumpValues("Currencies fallback", fallback);
+    setHint(hintId, `Валюты (fallback): ${fallback.length}`);
+  });
+}
+// ========= Selects: search + styling =========
+function enhanceSelectWithSearch(select) {
+  if (!select || select.dataset.searchable === "1") return;
+  select.dataset.searchable = "1";
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "select-search";
+
+  const parent = select.parentNode;
+  if (!parent) return;
+  parent.insertBefore(wrapper, select);
+  wrapper.appendChild(select);
+
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.className = "control select-search__input";
+  searchInput.autocomplete = "off";
+  searchInput.spellcheck = false;
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "select-search__toggle";
+  toggle.setAttribute("aria-label", "Показать варианты");
+  toggle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.4 9.6a1 1 0 0 1 1.2-.2l4.4 2.4 4.4-2.4a1 1 0 1 1 1 1.74l-4.9 2.7a1 1 0 0 1-.98 0l-4.9-2.7a1 1 0 0 1-.3-1.54Z"/></svg>';
+
+  const list = document.createElement("div");
+  list.className = "select-search__list";
+
+  wrapper.appendChild(searchInput);
+  wrapper.appendChild(toggle);
+  wrapper.appendChild(list);
+
+  select.classList.add("select-hidden");
+
+  const searchId = select.id ? `${select.id}__search` : "";
+  if (searchId) {
+    searchInput.id = searchId;
+    const label = document.querySelector(`label[for="${select.id}"]`);
+    if (label) label.setAttribute("for", searchId);
   }
+
+  const placeholderText = () => {
+    const opt0 = select.querySelector("option[value='']");
+    return opt0 ? opt0.textContent.trim() : "Р’С‹Р±РµСЂРёС‚Рµ Р·РЅР°С‡РµРЅРёРµ";
+  };
+
+  const closeList = () => wrapper.classList.remove("is-open");
+  const openList = () => {
+    wrapper.classList.add("is-open");
+    renderList(searchInput.value);
+  };
+
+  const syncFromSelect = () => {
+    const selected = select.options[select.selectedIndex];
+    if (selected && selected.value) {
+      searchInput.value = selected.textContent;
+    } else {
+      searchInput.value = "";
+    }
+    searchInput.placeholder = placeholderText();
+    searchInput.disabled = select.disabled;
+    wrapper.classList.toggle("is-disabled", select.disabled);
+  };
+
+  const chooseOption = (value) => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    syncFromSelect();
+    closeList();
+    searchInput.blur();
+  };
+
+  const renderList = (filter = "") => {
+    list.innerHTML = "";
+    const term = filter.trim().toLowerCase();
+    const options = Array.from(select.options).filter((o) => o.value !== "");
+    const filtered = term
+      ? options.filter((o) => o.textContent.toLowerCase().includes(term))
+      : options;
+
+    if (!filtered.length) {
+      const empty = document.createElement("div");
+      empty.className = "select-search__empty";
+      empty.textContent = "РќРµ РЅР°Р№РґРµРЅРѕ";
+      list.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach((opt) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "select-search__item";
+      if (select.value === opt.value) item.classList.add("is-selected");
+      item.textContent = opt.textContent;
+      item.dataset.value = opt.value;
+      item.addEventListener("click", () => chooseOption(opt.value));
+      list.appendChild(item);
+    });
+  };
+
+  searchInput.addEventListener("focus", () => openList());
+  searchInput.addEventListener("input", () => openList());
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeList();
+      searchInput.blur();
+    }
+  });
+
+  toggle.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (wrapper.classList.contains("is-open")) closeList();
+    else openList();
+    searchInput.focus();
+  });
+
+  select.addEventListener("change", syncFromSelect);
+
+  const observer = new MutationObserver(() => {
+    syncFromSelect();
+    if (wrapper.classList.contains("is-open")) renderList(searchInput.value);
+  });
+  observer.observe(select, { childList: true, subtree: true });
+
+  document.addEventListener("click", (evt) => {
+    if (!wrapper.contains(evt.target)) closeList();
+  });
+
+  searchInput.addEventListener("blur", () => {
+    setTimeout(() => {
+      closeList();
+      syncFromSelect();
+    }, 120);
+  });
+
+  syncFromSelect();
+}
+
+function setupSelectSearch() {
+  document.querySelectorAll("select.control").forEach(enhanceSelectWithSearch);
+}
+
+// ========= File input UI =========
+function setupFilePicker() {
+  const wrapper = document.querySelector(".input-file");
+  const input = wrapper?.querySelector('input[type="file"]');
+  const text = wrapper?.querySelector(".input-file-text");
+  if (!wrapper || !input || !text) return;
+
+  const placeholder = text.dataset.placeholder || "Р¤Р°Р№Р»С‹ РЅРµ РІС‹Р±СЂР°РЅС‹";
+
+  const update = () => {
+    const files = Array.from(input.files || []);
+    if (!files.length) {
+      text.textContent = placeholder;
+      return;
+    }
+
+    if (files.length === 1) {
+      text.textContent = files[0].name;
+      return;
+    }
+
+    const visible = files.slice(0, 2).map((f) => f.name).join(", ");
+    const extra = files.length - 2;
+    text.textContent = extra > 0 ? `${visible} + РµС‰С‘ ${extra}` : visible;
+  };
+
+  update();
+  input.addEventListener("change", update);
 }
 
 // ========= Submit =========
@@ -533,11 +739,24 @@ function setupSubmit() {
 
 // ========= Init =========
 BX24.init(async () => {
+  setupSelectSearch();
   await Promise.all([loadUsersToInitiator(), loadCurrencies()]);
 
   await loadDCAndPDC();
   await loadArticlesAndSubarticles();
 
+  setupFilePicker();
   setupSubmit();
-  logDebug("Готово.");
+  logDebug("Р“РѕС‚РѕРІРѕ.");
 });
+
+
+
+
+
+
+
+
+
+
+
