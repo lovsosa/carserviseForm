@@ -584,7 +584,6 @@ textarea.control {
   inset: 0;
   background: rgba(18, 25, 38, 0.45);
   backdrop-filter: blur(6px);
-  z-index: 0;
 }
 
 .submit-overlay__modal {
@@ -599,17 +598,6 @@ textarea.control {
   z-index: 1;
   display: grid;
   gap: 10px;
-}
-.submit-overlay { pointer-events: none; }
-.submit-overlay.is-active { pointer-events: none; }
-
-.submit-overlay__modal,
-.submit-overlay__modal * {
-  pointer-events: auto;
-}
-
-.submit-overlay__backdrop {
-  pointer-events: auto;
 }
 
 .submit-overlay__status {
